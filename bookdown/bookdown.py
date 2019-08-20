@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 class Spinder():
     ''' 获取所有链接 '''
 
-    def __init__(self, url, headers, book):
+    def __init__(self, url, headers):
         '''
             log 日志对象
             url 爬取的url
@@ -25,7 +25,6 @@ class Spinder():
         '''
         self.url = url
         self.headers = headers
-        self.book = book
         # 日志初始化
         self.log = self.log_init()
 
@@ -43,13 +42,19 @@ class Spinder():
     def get_html(self):
         ''' 获取html '''
         rsp = requests.get(self.url, headers=self.headers)
-        self.html = rsp.text
+        return rsp.text
 
     def beautiful_html(self):
         ''' 修复html '''
         soup = BeautifulSoup(self.html, 'lxml')
         soup.prettify()
-        self.soup = soup
+        return soup
+
+    def book_name(self):
+        ''' 获取书籍名字 '''
+        book = self.soup.select("#content-list > div.book-intro.clearfix > div.book-describe > h1")[0].get_text()
+        return book
+
 
     def extract_piece(self):
         ''' 获取卷名 '''
@@ -114,8 +119,9 @@ class Spinder():
 
     def run(self):
         ''' 开始方法 '''
-        self.get_html()
-        self.beautiful_html()
+        self.html = self.get_html()
+        self.soup = self.beautiful_html()
+        self.book = self.book_name()
         self.extract_section()
 
     def print_data(self):
@@ -124,21 +130,27 @@ class Spinder():
 
 
 class Download(Spinder):
-    def __init__(self, url, headers, book):
+    def __init__(self, url, headers):
         self.texts = {}
         ''' 调用父类的构造方法 '''
-        super().__init__(url, headers, book)
+        super().__init__(url, headers)
 
 
     def extract_txt(self, html):
         ''' 提取文章内容 '''
+        # 修复html
         soup = BeautifulSoup(html, 'lxml')
         soup.prettify()
+
+        # 获取文章内容的html 列表
         texts = soup.select('#nr1')[0].find_all('p', {'class': False})
+        # 初始化文章内容
         p = ''
         for text in texts:
+            # 去除 不需要的
             target = re.match('.*?落.*?霞.*?小.*?(说|說).*?', str(text))
             if not target:
+                # 获取文章内容
                 p += text.get_text('\n')+'\n'
         return p
 
@@ -146,29 +158,49 @@ class Download(Spinder):
         ''' aiohttp 异步获取内容 '''
         async with self.session.get(url) as rsp:
             html = await rsp.text()
+            # 提取需要的内容
             text = self.extract_txt(html)
+            # 文章内容添加到字典
             self.texts[piece].append((id_num,title,text))
 
 
     def download(self, loop):
         ''' 下载 '''
+
+        # loop 无关紧要
         if loop:
             asyncio.set_event_loop(loop)
             self.loop = loop
             self.log.setLevel(logging.ERROR)
         else:
             self.loop = asyncio.get_event_loop()
+        # aiohttp 获取session 
         self.session = client.ClientSession(headers=self.headers)
+        # 协程任务列表
         tasks = []
+        # 添加协程任务 
+        # pieces {卷名:[(章节名称,链接),]}
         for piece, sections in self.pieces.items():
+            # 初始化 存文章内容的列表
+            # texts {
+            #        卷名:[(序号,章节名,内容),]
+            #   }
             self.texts[piece] = []
+            # 序号
             id_num = 1
 
             for title, link in sections:
+                # tile 章节名
+                # link 章节链接
+                # piece 卷名
+                # id_num 序号
+                # 创建一个协程任务 获取html
                 task = self.get_text_html(link, title, piece, id_num)
+                # 加入列表 
                 tasks.append(task)
                 id_num += 1
         self.log.info('开始下载 %s' % self.book)
+        # 运行协程任务
         self.loop.run_until_complete(asyncio.wait(tasks))
 
 
@@ -201,16 +233,22 @@ class Download(Spinder):
 
     def save_file(self, save_path,piece,texts):
         ''' 保存到文件 '''
+        # 通过序号排序
         texts = sorted(texts, key=lambda x: x[0])
+        # 判断目录是否存在 不存在创建
         if not os.path.exists(save_path):
             os.makedirs(save_path)
+        # 保存的文件名
         path = os.path.join(save_path, f"{self.book}-{piece}.txt")
         if piece == '':
+            # 没有卷名就直接保存书名
             path = os.path.join(save_path, f"{self.book}.txt")
-
-        if os.path.exists(path):
-            os.remove(path)
+        
+        # 打开文件
         f = Path(path).open("w",1024,"utf-8")
+        # texts 
+        #       [(序号,章节名,内容),]
+        #   
         for id_num,  title, text in texts:
                 title = re.sub('第(.*)幕', '第\g<1>章', title)
                 if not re.match('第.*(章|篇)', title):
@@ -221,16 +259,23 @@ class Download(Spinder):
         f.close()
 
     def save(self,save_path):
+        ''' 不同卷名保存不同文件 '''
+        # texts {
+        #        卷名:[(序号,章节名,内容),],
+        #   }
+
+        # 不止一个文件时 创建文件夹保存
+        if len(self.texts.keys()) > 1:
+            save_path = os.path.join(save_path,self.book)
         for piece,content in self.texts.items():
             self.save_file(save_path,piece,content)
 
 
 def initParser():
     ''' 初始化参数解析器 '''
-    parser = ArgumentParser("bookdown", "book", "小说爬虫洛霞小说网", "v1")
-    parser.add_argument("url", type=str, help="目标url")
-    parser.add_argument("-n", dest="name", type=str, help="名字", required=True)
-    parser.add_argument("-d", dest="dir", type=str, default="./books", help="下载目录", required=False,nargs="?")
+    parser = ArgumentParser("bookdown", "bookdown", "小说爬虫洛霞小说网", "v1.0")
+    parser.add_argument("url", type=str, help="目标url 示例 http://www.luoxia.com/longzu/")
+    parser.add_argument("-d", dest="dir", type=str, default="./books", help="下载目录 默认./books", required=False,nargs="?")
     return parser
 
 
@@ -242,23 +287,19 @@ def main():
 
     warnings.filterwarnings("ignore")
 
-
-    url = 'http://www.luoxia.com/longzu/'
     url = args.url
-    book = args.name
     headers = {
         "User-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:66.0) Gecko/20100101 Firefox/66.0"
     }
 
     s1 = Download(url,
-                  headers=headers, book=book)
+                  headers=headers,)
     s1.run(args.dir)
 
 
 if __name__ == "__main__":
     import sys
     try:
-
         main()
     except Exception as e:
         logging.error(e)

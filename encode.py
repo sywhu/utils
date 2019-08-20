@@ -26,9 +26,9 @@ def convert(files,old_encode):
             with file.open("w", 1024, encoding="utf-8") as f:
                 f.write(text)
         except:
-            print("转换失败跳过：",file)
+            print(f"\033[31m 转换失败跳过：{file} \033[0m")
         else:
-            print("转化成功：",file)
+            print(f"\033[32m 转化成功：{file} \033[0m")
 
 def main():
     # 初始化 参数解析器

@@ -1,0 +1,16 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+verify_ssl = true
+
+[dev-packages]
+pyinstaller = "*"
+
+[packages]
+lxml = "*"
+requests = "*"
+beautifulsoup4 = "*"
+aiohttp = "*"
+
+[requires]
+python_version = "3.7"

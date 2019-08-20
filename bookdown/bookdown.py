@@ -6,6 +6,7 @@ import re
 import time
 import warnings
 from argparse import ArgumentParser
+from pathlib import Path
 
 import requests
 from aiohttp import client
@@ -204,20 +205,22 @@ class Download(Spinder):
         if not os.path.exists(save_path):
             os.makedirs(save_path)
         path = os.path.join(save_path, f"{self.book}-{piece}.txt")
+        if piece == '':
+            path = os.path.join(save_path, f"{self.book}.txt")
+
         if os.path.exists(path):
             os.remove(path)
-        f = open(path,"w",encoding='utf-8')
+        f = Path(path).open("w",1024,"utf-8")
         for id_num,  title, text in texts:
-            title = re.sub('第(.*)幕', '第\g<1>章', title)
-            if not re.match('第.*(章|篇)', title):
-                title = '第%s章 ' % id_num + title
-            f.write(title+'\n')
-            f.write(text)
-            f.write('\n\n\n')
+                title = re.sub('第(.*)幕', '第\g<1>章', title)
+                if not re.match('第.*(章|篇)', title):
+                    title = '第%s章 ' % id_num + title
+                f.write(title+'\n')
+                f.write(text)
+                f.write('\n\n\n')
         f.close()
 
     def save(self,save_path):
-        print(self.texts.keys())
         for piece,content in self.texts.items():
             self.save_file(save_path,piece,content)
 

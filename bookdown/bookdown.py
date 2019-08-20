@@ -200,7 +200,7 @@ class Download(Spinder):
 
     def save_file(self, save_path,piece,texts):
         ''' 保存到文件 '''
-        texts = sorted(self.texts, key=lambda x: x[0])
+        texts = sorted(texts, key=lambda x: x[0])
         if not os.path.exists(save_path):
             os.makedirs(save_path)
         path = os.path.join(save_path, f"{self.book}-{piece}.txt")
@@ -217,6 +217,7 @@ class Download(Spinder):
         f.close()
 
     def save(self,save_path):
+        print(self.texts.keys())
         for piece,content in self.texts.items():
             self.save_file(save_path,piece,content)
 

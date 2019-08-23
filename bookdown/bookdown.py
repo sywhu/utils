@@ -7,6 +7,8 @@ import time
 import warnings
 from argparse import ArgumentParser
 from pathlib import Path
+import sys
+from threading import Thread
 
 import requests
 from aiohttp import client
@@ -44,9 +46,9 @@ class Spinder():
         rsp = requests.get(self.url, headers=self.headers)
         return rsp.text
 
-    def beautiful_html(self):
+    def beautiful_html(self,html):
         ''' 修复html '''
-        soup = BeautifulSoup(self.html, 'lxml')
+        soup = BeautifulSoup(html, 'lxml')
         soup.prettify()
         return soup
 
@@ -69,8 +71,11 @@ class Spinder():
                 piece = '其他'
             yield piece
 
-    def extract_section(self):
-        ''' 获取文章url '''
+    def extract_section(self) -> int:
+        '''
+         获取文章url
+         return url_num 
+        '''
         atts = {
             'class': 'book-list clearfix'
         }
@@ -81,6 +86,7 @@ class Spinder():
         # 所有url 保存的对象
         pieces = {}
         # for 获取每一个 卷明下面的html对象
+        url_num = 0
         for warp in warps:
             try:
                 # 利用生成器 获取卷名
@@ -92,8 +98,10 @@ class Spinder():
             pieces[piece] = []
             # 获取下面的每个存放url的列表
             sections = warp.ul.find_all('li')
+
             # 获取每一个url
             for section in sections:
+                url_num += 1
                 # html 一些是open 一些是a链接 判断获取url
                 if section.a == None:
                     section = section.b
@@ -105,12 +113,14 @@ class Spinder():
                 else:
                     section = section.a
                     link = section.attrs['href']
+                
                 # 获取每一个li下面的文字就是标题
                 title = section.get_text(strip=True)
                 # 存放 标题和url
                 pieces[piece].append((title, link))
         # 存入类变量中
         self.pieces = pieces
+        return url_num
 
     def save(self):
         ''' 保存到json '''
@@ -119,10 +129,11 @@ class Spinder():
 
     def run(self):
         ''' 开始方法 '''
-        self.html = self.get_html()
-        self.soup = self.beautiful_html()
+        self.progress = [100,0] # 进度 第一个 总的url数量
+        html = self.get_html()
+        self.soup = self.beautiful_html(html)
         self.book = self.book_name()
-        self.extract_section()
+        self.progress[0]  = self.extract_section()
 
     def print_data(self):
         ''' 打印 存放的url的字典 '''
@@ -154,12 +165,24 @@ class Download(Spinder):
                 p += text.get_text('\n')+'\n'
         return p
 
+
+    def print_progress(self):
+        ''' 打印进度条 '''
+        while True:
+            progress = self.progress[1]/self.progress[0]
+            text = "\r["+">"*int(progress*40)+"-"*int((1-progress)*40)+ "] \033[35m {book} \033[0m   \033[32m{}%     ({}/{})\033[0m".format(round(progress*100,2),self.progress[1],self.progress[0],book=self.book)
+            print(text,end="")
+            time.sleep(0.5)
+
+
     async def get_text_html(self, url, title, piece, id_num):
         ''' aiohttp 异步获取内容 '''
         async with self.session.get(url) as rsp:
             html = await rsp.text()
             # 提取需要的内容
             text = self.extract_txt(html)
+            # 进度+1 
+            self.progress[1] += 1
             # 文章内容添加到字典
             self.texts[piece].append((id_num,title,text))
 
@@ -200,6 +223,8 @@ class Download(Spinder):
                 tasks.append(task)
                 id_num += 1
         self.log.info('开始下载 %s' % self.book)
+        # 打印进度 
+        Thread(target=self.print_progress,name="print_progress",daemon=True).start()
         # 运行协程任务
         self.loop.run_until_complete(asyncio.wait(tasks))
 

@@ -7,7 +7,6 @@ import time
 import warnings
 from argparse import ArgumentParser
 from pathlib import Path
-import sys
 from threading import Thread
 
 import requests
@@ -187,9 +186,7 @@ class Download(Spinder):
             self.texts[piece].append((id_num,title,text))
 
 
-    def download(self, loop):
-        ''' 下载 '''
-
+    async def async_download(self,loop):
         # loop 无关紧要
         if loop:
             asyncio.set_event_loop(loop)
@@ -197,11 +194,11 @@ class Download(Spinder):
             self.log.setLevel(logging.ERROR)
         else:
             self.loop = asyncio.get_event_loop()
-        # aiohttp 获取session 
+        # aiohttp 获取session
         self.session = client.ClientSession(headers=self.headers)
         # 协程任务列表
         tasks = []
-        # 添加协程任务 
+        # 添加协程任务
         # pieces {卷名:[(章节名称,链接),]}
         for piece, sections in self.pieces.items():
             # 初始化 存文章内容的列表
@@ -219,24 +216,24 @@ class Download(Spinder):
                 # id_num 序号
                 # 创建一个协程任务 获取html
                 task = self.get_text_html(link, title, piece, id_num)
-                # 加入列表 
+                # 加入列表
+                task = asyncio.create_task(task)
                 tasks.append(task)
+                await task
                 id_num += 1
+        await self.session.close()
+    def download(self, loop):
+        ''' 下载 '''
+
         self.log.info('开始下载 %s' % self.book)
         # 打印进度 
         Thread(target=self.print_progress,name="print_progress",daemon=True).start()
         # 运行协程任务
-        self.loop.run_until_complete(asyncio.wait(tasks))
+        task = self.async_download(None)
+        asyncio.run(task)
 
 
-    async def clean(self):
-        ''' 异步关闭aiohttp '''
-        await self.session.close()
 
-    def close(self):
-        ''' 关闭aiohttp '''
-        self.loop.run_until_complete(self.clean())
-        self.loop.close()
 
     def run(self, save_path='.', loop=None):
         ''' 开始方法 '''
@@ -250,8 +247,6 @@ class Download(Spinder):
         self.log.info('开始写入文件 %s.txt' % self.book)
         # 调用保存方法保存文件
         self.save(save_path)
-        # 关闭aiohttp
-        self.close()
         stop = time.time()
         # 打印日志
         self.log.info('写入文件完成爬取完成 总时间 %s s' % (stop - start))
@@ -276,7 +271,7 @@ class Download(Spinder):
         #   
         for id_num,  title, text in texts:
                 title = re.sub('第(.*)幕', '第\g<1>章', title)
-                if not re.match('第.*(章|篇)', title):
+                if not re.match('第.*([章篇])', title):
                     title = '第%s章 ' % id_num + title
                 f.write(title+'\n')
                 f.write(text)
@@ -323,9 +318,10 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
+    import sys,traceback
     try:
         main()
     except Exception as e:
         logging.error(e)
+        traceback.print_exc()
         sys.exit(1)
